@@ -117,7 +117,7 @@ export default function GlassBox({ onInteraction }) {
                     }}>
                         <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00d4aa' }} />
                         <span style={{ fontSize: 10, color: '#00d4aa', fontWeight: 600, letterSpacing: '0.04em' }}>
-              LIVE — Gemini 2.0 Flash API
+              LIVE — Gemini 2.5 Flash-Lite API
             </span>
                     </div>
                 </div>

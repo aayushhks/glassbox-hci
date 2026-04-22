@@ -7,7 +7,7 @@
  * (how far into novel territory the settings push the model).
  */
 
-const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent'
 
 function getApiKey() {
     return import.meta.env.VITE_GEMINI_API_KEY || ''
