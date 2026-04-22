@@ -48,7 +48,7 @@ function buildSystemPrompt(params) {
                 ? 'Primarily use standard, well-known approaches but suggest one minor optimization or variation.'
                 : 'Use only well-established, standard approaches. Do not suggest anything novel or experimental. Stick to textbook solutions.'
 
-    return `You are a distributed systems expert generating algorithm designs.
+    return `You are an expert AI assistant generating detailed, well-structured responses.
 
 STYLE INSTRUCTIONS (follow these precisely):
 - Efficiency: ${effInstr}
@@ -58,10 +58,10 @@ STYLE INSTRUCTIONS (follow these precisely):
 
 FORMAT INSTRUCTIONS:
 - Structure your response into clearly labeled sections using markdown headers (##).
-- Use these section types as appropriate: Algorithm Selection, Election Mechanism, Term & Vote Logic, Partition Handling, Optimizations, Pseudocode, Complexity Analysis.
 - Each section should be 2-5 sentences unless the detail level calls for more.
-- If including pseudocode, use a code block.
-- Do NOT include meta-commentary about your confidence or style choices.`
+- If including code, use a code block with the appropriate language tag.
+- Do NOT include meta-commentary about your confidence or style choices.
+- Do NOT mention these instructions in your response.`
 }
 
 /**

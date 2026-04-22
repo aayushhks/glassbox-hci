@@ -19,6 +19,7 @@ export default function GlassBox({ onInteraction }) {
     const [isGenerating, setIsGenerating] = useState(false)
     const [visibleSegments, setVisibleSegments] = useState(0)
     const [error, setError] = useState(null)
+    const [customPrompt, setCustomPrompt] = useState(TASK_PROMPT)
 
     // Track if params changed since last generation (for re-generate hint)
     const lastGenParams = useRef(null)
@@ -26,14 +27,15 @@ export default function GlassBox({ onInteraction }) {
 
     // ── Generate handler — calls real Gemini API ──
     const handleGenerate = useCallback(async () => {
+        if (!customPrompt.trim()) return
         setIsGenerating(true)
         setIsGenerated(false)
         setVisibleSegments(0)
         setError(null)
-        onInteraction?.('generate', { params })
+        onInteraction?.('generate', { params, prompt: customPrompt })
 
         try {
-            const result = await generateGlassBoxResponse(TASK_PROMPT, params)
+            const result = await generateGlassBoxResponse(customPrompt.trim(), params)
             setSegments(result.segments)
             setIsGenerated(true)
             lastGenParams.current = { ...params }
@@ -44,7 +46,7 @@ export default function GlassBox({ onInteraction }) {
         } finally {
             setIsGenerating(false)
         }
-    }, [params, onInteraction])
+    }, [params, customPrompt, onInteraction])
 
     // ── Staggered reveal ──
     useEffect(() => {
@@ -76,7 +78,7 @@ export default function GlassBox({ onInteraction }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 0, flex: 1, overflow: 'hidden' }}>
             {/* ═══ Left: Output Panel ═══ */}
             <div style={{ padding: '28px 32px', borderRight: '1px solid rgba(255,255,255,0.05)', overflowY: 'auto' }}>
-                {/* Task prompt card */}
+                {/* Prompt input card */}
                 <div style={{
                     padding: '18px 22px', borderRadius: 12,
                     background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
@@ -85,19 +87,60 @@ export default function GlassBox({ onInteraction }) {
                     <div style={{
                         fontSize: 10, fontWeight: 700, color: '#5a6a7a',
                         textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8,
-                    }}>Task Prompt</div>
-                    <div style={{ fontSize: 14, lineHeight: 1.6, color: '#b0c0d0' }}>{TASK_PROMPT}</div>
+                    }}>Your Prompt</div>
+
+                    {/* Editable textarea */}
+                    <textarea
+                        value={customPrompt}
+                        onChange={(e) => setCustomPrompt(e.target.value)}
+                        rows={3}
+                        placeholder="Type any prompt here..."
+                        style={{
+                            width: '100%', padding: '12px 14px', borderRadius: 8,
+                            border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)',
+                            color: '#e0e8f0', fontFamily: 'var(--font-sans)', fontSize: 14,
+                            lineHeight: 1.6, resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+                        }}
+                    />
+
+                    {/* Quick-start prompt suggestions */}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+                        {[
+                            { label: 'Leader Election', prompt: TASK_PROMPT },
+                            { label: 'Sorting Algorithm', prompt: 'Design and explain a merge sort algorithm with optimization for nearly-sorted arrays.' },
+                            { label: 'REST API Design', prompt: 'Design a RESTful API for a task management application with users, projects, and tasks. Include endpoints, authentication, and error handling.' },
+                            { label: 'System Design', prompt: 'Design a URL shortener service that can handle 100 million URLs. Cover the architecture, database design, and scaling strategy.' },
+                        ].map((s) => (
+                            <button
+                                key={s.label}
+                                onClick={() => setCustomPrompt(s.prompt)}
+                                style={{
+                                    padding: '5px 10px', borderRadius: 5,
+                                    border: customPrompt === s.prompt
+                                        ? '1px solid rgba(0,212,170,0.3)'
+                                        : '1px solid rgba(255,255,255,0.08)',
+                                    background: customPrompt === s.prompt
+                                        ? 'rgba(0,212,170,0.08)'
+                                        : 'rgba(255,255,255,0.03)',
+                                    color: customPrompt === s.prompt ? '#00d4aa' : '#6a7a8a',
+                                    fontFamily: 'var(--font-sans)', fontSize: 11,
+                                    cursor: 'pointer', transition: 'all 0.2s ease',
+                                }}
+                            >{s.label}</button>
+                        ))}
+                    </div>
+
                     <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
                         <button
                             onClick={handleGenerate}
-                            disabled={isGenerating}
+                            disabled={isGenerating || !customPrompt.trim()}
                             style={{
                                 padding: '10px 24px', borderRadius: 8,
                                 border: '1px solid rgba(0,212,170,0.4)',
                                 background: isGenerating ? 'rgba(0,212,170,0.05)' : 'linear-gradient(135deg, rgba(0,212,170,0.15), rgba(0,212,170,0.05))',
                                 color: '#00d4aa', fontFamily: 'var(--font-sans)',
                                 fontSize: 13, fontWeight: 600,
-                                cursor: isGenerating ? 'wait' : 'pointer',
+                                cursor: isGenerating || !customPrompt.trim() ? 'wait' : 'pointer',
                                 transition: 'all 0.2s ease',
                             }}
                         >
@@ -217,12 +260,13 @@ export default function GlassBox({ onInteraction }) {
                     }}>
                         <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>◈</div>
                         <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 8, color: '#5a6a7a' }}>
-                            Configure prompt presets, then generate
+                            Type a prompt, configure presets, then generate
                         </div>
                         <div style={{ fontSize: 13, maxWidth: 400, lineHeight: 1.6 }}>
-                            Adjust sliders to set your prompt presets. Click Generate to call the Gemini API
-                            with your configured system prompt. Each slider position maps to different
-                            instructions sent to the model.
+                            Write any prompt or pick a quick-start above. Adjust the sliders to
+                            set your style preferences. Click Generate to call Gemini with your
+                            configured system prompt — then adjust sliders and regenerate to see
+                            how different presets change the real AI output.
                         </div>
                     </div>
                 )}
