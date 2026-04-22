@@ -2,10 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { TASK_PROMPT } from '../../data/responses'
 import { getStabilityStyle } from '../../utils/confidence'
 import { generateGlassBoxResponse } from '../../services/gemini'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import ParameterSlider from './ParameterSlider'
 import StabilitySegment from './StabilitySegment'
 
 export default function GlassBox({ onInteraction }) {
+    const isMobile = useIsMobile()
+    const [mobileTab, setMobileTab] = useState('output') // 'output' | 'controls'
     const [params, setParams] = useState({
         efficiency: 50,
         readability: 70,
@@ -75,293 +78,336 @@ export default function GlassBox({ onInteraction }) {
         : null
 
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 0, flex: 1, overflow: 'hidden' }}>
-            {/* ═══ Left: Output Panel ═══ */}
-            <div style={{ padding: '28px 32px', borderRight: '1px solid rgba(255,255,255,0.05)', overflowY: 'auto' }}>
-                {/* Prompt input card */}
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+            {/* Mobile tab toggle */}
+            {isMobile && (
                 <div style={{
-                    padding: '18px 22px', borderRadius: 12,
-                    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
-                    marginBottom: 24,
+                    display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    background: 'rgba(255,255,255,0.02)',
                 }}>
-                    <div style={{
-                        fontSize: 10, fontWeight: 700, color: '#5a6a7a',
-                        textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8,
-                    }}>Your Prompt</div>
-
-                    {/* Editable textarea */}
-                    <textarea
-                        value={customPrompt}
-                        onChange={(e) => setCustomPrompt(e.target.value)}
-                        rows={3}
-                        placeholder="Type any prompt here..."
-                        style={{
-                            width: '100%', padding: '12px 14px', borderRadius: 8,
-                            border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)',
-                            color: '#e0e8f0', fontFamily: 'var(--font-sans)', fontSize: 14,
-                            lineHeight: 1.6, resize: 'vertical', outline: 'none', boxSizing: 'border-box',
-                        }}
-                    />
-
-                    {/* Quick-start prompt suggestions */}
-                    <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
-                        {[
-                            { label: 'Leader Election', prompt: TASK_PROMPT },
-                            { label: 'Sorting Algorithm', prompt: 'Design and explain a merge sort algorithm with optimization for nearly-sorted arrays.' },
-                            { label: 'REST API Design', prompt: 'Design a RESTful API for a task management application with users, projects, and tasks. Include endpoints, authentication, and error handling.' },
-                            { label: 'System Design', prompt: 'Design a URL shortener service that can handle 100 million URLs. Cover the architecture, database design, and scaling strategy.' },
-                        ].map((s) => (
-                            <button
-                                key={s.label}
-                                onClick={() => setCustomPrompt(s.prompt)}
-                                style={{
-                                    padding: '5px 10px', borderRadius: 5,
-                                    border: customPrompt === s.prompt
-                                        ? '1px solid rgba(0,212,170,0.3)'
-                                        : '1px solid rgba(255,255,255,0.08)',
-                                    background: customPrompt === s.prompt
-                                        ? 'rgba(0,212,170,0.08)'
-                                        : 'rgba(255,255,255,0.03)',
-                                    color: customPrompt === s.prompt ? '#00d4aa' : '#6a7a8a',
-                                    fontFamily: 'var(--font-sans)', fontSize: 11,
-                                    cursor: 'pointer', transition: 'all 0.2s ease',
-                                }}
-                            >{s.label}</button>
-                        ))}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
+                    {[
+                        { key: 'output', label: 'Output' },
+                        { key: 'controls', label: 'Controls' },
+                    ].map((tab) => (
                         <button
-                            onClick={handleGenerate}
-                            disabled={isGenerating || !customPrompt.trim()}
+                            key={tab.key}
+                            onClick={() => setMobileTab(tab.key)}
                             style={{
-                                padding: '10px 24px', borderRadius: 8,
-                                border: '1px solid rgba(0,212,170,0.4)',
-                                background: isGenerating ? 'rgba(0,212,170,0.05)' : 'linear-gradient(135deg, rgba(0,212,170,0.15), rgba(0,212,170,0.05))',
-                                color: '#00d4aa', fontFamily: 'var(--font-sans)',
-                                fontSize: 13, fontWeight: 600,
-                                cursor: isGenerating || !customPrompt.trim() ? 'wait' : 'pointer',
-                                transition: 'all 0.2s ease',
+                                flex: 1, padding: '10px', border: 'none',
+                                background: mobileTab === tab.key ? 'rgba(0,212,170,0.08)' : 'transparent',
+                                color: mobileTab === tab.key ? '#00d4aa' : '#5a6a7a',
+                                fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600,
+                                cursor: 'pointer', borderBottom: mobileTab === tab.key ? '2px solid #00d4aa' : '2px solid transparent',
                             }}
-                        >
-                            {isGenerating ? 'Calling Gemini...' : isGenerated ? '⟲ Regenerate with Current Settings' : '▶ Generate with Gemini'}
-                        </button>
-                        {paramsChanged && isGenerated && (
-                            <span style={{ fontSize: 11, color: '#f0b429' }}>
-                ⚠ Sliders changed — click Regenerate to see updated output
-              </span>
-                        )}
-                    </div>
-                    {/* Live API badge */}
-                    <div style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                        marginTop: 10, padding: '4px 10px', borderRadius: 4,
-                        background: 'rgba(0,212,170,0.06)', border: '1px solid rgba(0,212,170,0.15)',
-                    }}>
-                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00d4aa' }} />
-                        <span style={{ fontSize: 10, color: '#00d4aa', fontWeight: 600, letterSpacing: '0.04em' }}>
-              LIVE — Gemini 2.5 Flash-Lite API
-            </span>
-                    </div>
+                        >{tab.label}</button>
+                    ))}
                 </div>
+            )}
 
-                {/* Error display */}
-                {error && (
+            <div style={{
+                display: isMobile ? 'flex' : 'grid',
+                gridTemplateColumns: isMobile ? undefined : '1fr 300px',
+                flexDirection: isMobile ? 'column' : undefined,
+                gap: 0, flex: 1, overflow: 'hidden',
+            }}>
+                {/* ═══ Left: Output Panel ═══ */}
+                <div style={{
+                    padding: isMobile ? '20px 16px' : '28px 32px',
+                    borderRight: isMobile ? 'none' : '1px solid rgba(255,255,255,0.05)',
+                    overflowY: 'auto',
+                    display: isMobile && mobileTab !== 'output' ? 'none' : 'block',
+                    flex: isMobile ? 1 : undefined,
+                }}>
+                    {/* Prompt input card */}
                     <div style={{
-                        padding: '14px 18px', borderRadius: 8, marginBottom: 16,
-                        background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.2)',
-                        fontSize: 13, color: '#ff6b6b', lineHeight: 1.5,
+                        padding: '18px 22px', borderRadius: 12,
+                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                        marginBottom: 24,
                     }}>
-                        <strong>API Error:</strong> {error}
-                    </div>
-                )}
+                        <div style={{
+                            fontSize: 10, fontWeight: 700, color: '#5a6a7a',
+                            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8,
+                        }}>Your Prompt</div>
 
-                {/* Generating animation */}
-                {isGenerating && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 0' }}>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                            {[0, 1, 2].map((i) => (
-                                <div key={i} style={{
-                                    width: 8, height: 8, borderRadius: '50%', background: '#00d4aa',
-                                    animation: `pulse-dot 1.2s ease-in-out ${i * 0.2}s infinite`,
-                                }} />
+                        {/* Editable textarea */}
+                        <textarea
+                            value={customPrompt}
+                            onChange={(e) => setCustomPrompt(e.target.value)}
+                            rows={3}
+                            placeholder="Type any prompt here..."
+                            style={{
+                                width: '100%', padding: '12px 14px', borderRadius: 8,
+                                border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)',
+                                color: '#e0e8f0', fontFamily: 'var(--font-sans)', fontSize: 14,
+                                lineHeight: 1.6, resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+                            }}
+                        />
+
+                        {/* Quick-start prompt suggestions */}
+                        <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+                            {[
+                                { label: 'Leader Election', prompt: TASK_PROMPT },
+                                { label: 'Sorting Algorithm', prompt: 'Design and explain a merge sort algorithm with optimization for nearly-sorted arrays.' },
+                                { label: 'REST API Design', prompt: 'Design a RESTful API for a task management application with users, projects, and tasks. Include endpoints, authentication, and error handling.' },
+                                { label: 'System Design', prompt: 'Design a URL shortener service that can handle 100 million URLs. Cover the architecture, database design, and scaling strategy.' },
+                            ].map((s) => (
+                                <button
+                                    key={s.label}
+                                    onClick={() => setCustomPrompt(s.prompt)}
+                                    style={{
+                                        padding: '5px 10px', borderRadius: 5,
+                                        border: customPrompt === s.prompt
+                                            ? '1px solid rgba(0,212,170,0.3)'
+                                            : '1px solid rgba(255,255,255,0.08)',
+                                        background: customPrompt === s.prompt
+                                            ? 'rgba(0,212,170,0.08)'
+                                            : 'rgba(255,255,255,0.03)',
+                                        color: customPrompt === s.prompt ? '#00d4aa' : '#6a7a8a',
+                                        fontFamily: 'var(--font-sans)', fontSize: 11,
+                                        cursor: 'pointer', transition: 'all 0.2s ease',
+                                    }}
+                                >{s.label}</button>
                             ))}
                         </div>
-                        <span style={{ fontSize: 13, color: '#5a6a7a' }}>
+
+                        <div style={{ display: 'flex', gap: 10, marginTop: 14, alignItems: 'center' }}>
+                            <button
+                                onClick={handleGenerate}
+                                disabled={isGenerating || !customPrompt.trim()}
+                                style={{
+                                    padding: '10px 24px', borderRadius: 8,
+                                    border: '1px solid rgba(0,212,170,0.4)',
+                                    background: isGenerating ? 'rgba(0,212,170,0.05)' : 'linear-gradient(135deg, rgba(0,212,170,0.15), rgba(0,212,170,0.05))',
+                                    color: '#00d4aa', fontFamily: 'var(--font-sans)',
+                                    fontSize: 13, fontWeight: 600,
+                                    cursor: isGenerating || !customPrompt.trim() ? 'wait' : 'pointer',
+                                    transition: 'all 0.2s ease',
+                                }}
+                            >
+                                {isGenerating ? 'Calling Gemini...' : isGenerated ? '⟲ Regenerate with Current Settings' : '▶ Generate with Gemini'}
+                            </button>
+                            {paramsChanged && isGenerated && (
+                                <span style={{ fontSize: 11, color: '#f0b429' }}>
+                ⚠ Sliders changed — click Regenerate to see updated output
+              </span>
+                            )}
+                        </div>
+                        {/* Live API badge */}
+                        <div style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            marginTop: 10, padding: '4px 10px', borderRadius: 4,
+                            background: 'rgba(0,212,170,0.06)', border: '1px solid rgba(0,212,170,0.15)',
+                        }}>
+                            <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00d4aa' }} />
+                            <span style={{ fontSize: 10, color: '#00d4aa', fontWeight: 600, letterSpacing: '0.04em' }}>
+              LIVE — Gemini 2.5 Flash-Lite API
+            </span>
+                        </div>
+                    </div>
+
+                    {/* Error display */}
+                    {error && (
+                        <div style={{
+                            padding: '14px 18px', borderRadius: 8, marginBottom: 16,
+                            background: 'rgba(255,107,107,0.08)', border: '1px solid rgba(255,107,107,0.2)',
+                            fontSize: 13, color: '#ff6b6b', lineHeight: 1.5,
+                        }}>
+                            <strong>API Error:</strong> {error}
+                        </div>
+                    )}
+
+                    {/* Generating animation */}
+                    {isGenerating && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '20px 0' }}>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                                {[0, 1, 2].map((i) => (
+                                    <div key={i} style={{
+                                        width: 8, height: 8, borderRadius: '50%', background: '#00d4aa',
+                                        animation: `pulse-dot 1.2s ease-in-out ${i * 0.2}s infinite`,
+                                    }} />
+                                ))}
+                            </div>
+                            <span style={{ fontSize: 13, color: '#5a6a7a' }}>
               Sending prompt presets to Gemini (temperature: {(0.3 + (params.creativity / 100) * 0.9).toFixed(1)})...
             </span>
-                    </div>
-                )}
+                        </div>
+                    )}
 
-                {/* Generated response */}
-                {isGenerated && segments.length > 0 && (
-                    <div>
-                        {/* Stability distribution bar */}
-                        <div style={{
-                            display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20,
-                            padding: '12px 16px', borderRadius: 8,
-                            background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
-                            flexWrap: 'wrap',
-                        }}>
+                    {/* Generated response */}
+                    {isGenerated && segments.length > 0 && (
+                        <div>
+                            {/* Stability distribution bar */}
+                            <div style={{
+                                display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20,
+                                padding: '12px 16px', borderRadius: 8,
+                                background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
+                                flexWrap: 'wrap',
+                            }}>
               <span style={{
                   fontSize: 11, color: '#5a6a7a', fontWeight: 600,
                   textTransform: 'uppercase', letterSpacing: '0.06em',
               }}>Generation Stability</span>
-                            <div style={{ display: 'flex', gap: 12 }}>
-                                {[
-                                    { label: 'High', color: '#00d4aa' },
-                                    { label: 'Medium', color: '#f0b429' },
-                                    { label: 'Low', color: '#ff6b6b' },
-                                ].map((l) => (
-                                    <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                        <div style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} />
-                                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: l.color }}>
+                                <div style={{ display: 'flex', gap: 12 }}>
+                                    {[
+                                        { label: 'High', color: '#00d4aa' },
+                                        { label: 'Medium', color: '#f0b429' },
+                                        { label: 'Low', color: '#ff6b6b' },
+                                    ].map((l) => (
+                                        <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                                            <div style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} />
+                                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: l.color }}>
                       {stabDist[l.label] || 0}
                     </span>
-                                    </div>
-                                ))}
-                            </div>
-                            <span style={{ fontSize: 11, color: '#4a5a6a', marginLeft: 'auto' }}>
+                                        </div>
+                                    ))}
+                                </div>
+                                <span style={{ fontSize: 11, color: '#4a5a6a', marginLeft: 'auto' }}>
                 Hover for transparency details
               </span>
-                        </div>
-
-                        {/* Segments */}
-                        {segments.map((seg, i) => (
-                            <div
-                                key={seg.id}
-                                style={{
-                                    opacity: i < visibleSegments ? 1 : 0,
-                                    transform: i < visibleSegments ? 'translateY(0)' : 'translateY(12px)',
-                                    transition: 'opacity 0.4s ease, transform 0.4s ease',
-                                }}
-                            >
-                                <StabilitySegment
-                                    segment={seg}
-                                    isHovered={hoveredSegment === seg.id}
-                                    onHover={() => {
-                                        setHoveredSegment(seg.id)
-                                        onInteraction?.('hover_segment', { segmentId: seg.id })
-                                    }}
-                                    onLeave={() => setHoveredSegment(null)}
-                                    showTransparency={showTransparency}
-                                />
                             </div>
-                        ))}
-                    </div>
-                )}
 
-                {/* Empty state */}
-                {!isGenerated && !isGenerating && !error && (
-                    <div style={{
-                        display: 'flex', flexDirection: 'column', alignItems: 'center',
-                        justifyContent: 'center', padding: '80px 40px',
-                        color: '#3a4a5a', textAlign: 'center',
-                    }}>
-                        <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>◈</div>
-                        <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 8, color: '#5a6a7a' }}>
-                            Type a prompt, configure presets, then generate
+                            {/* Segments */}
+                            {segments.map((seg, i) => (
+                                <div
+                                    key={seg.id}
+                                    style={{
+                                        opacity: i < visibleSegments ? 1 : 0,
+                                        transform: i < visibleSegments ? 'translateY(0)' : 'translateY(12px)',
+                                        transition: 'opacity 0.4s ease, transform 0.4s ease',
+                                    }}
+                                >
+                                    <StabilitySegment
+                                        segment={seg}
+                                        isHovered={hoveredSegment === seg.id}
+                                        onHover={() => {
+                                            setHoveredSegment(seg.id)
+                                            onInteraction?.('hover_segment', { segmentId: seg.id })
+                                        }}
+                                        onLeave={() => setHoveredSegment(null)}
+                                        showTransparency={showTransparency}
+                                    />
+                                </div>
+                            ))}
                         </div>
-                        <div style={{ fontSize: 13, maxWidth: 400, lineHeight: 1.6 }}>
-                            Write any prompt or pick a quick-start above. Adjust the sliders to
-                            set your style preferences. Click Generate to call Gemini with your
-                            configured system prompt — then adjust sliders and regenerate to see
-                            how different presets change the real AI output.
-                        </div>
-                    </div>
-                )}
-            </div>
+                    )}
 
-            {/* ═══ Right: Control Panel ═══ */}
-            <div style={{ padding: '28px 22px', background: 'rgba(255,255,255,0.01)', overflowY: 'auto' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    {/* Empty state */}
+                    {!isGenerated && !isGenerating && !error && (
+                        <div style={{
+                            display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'center', padding: '80px 40px',
+                            color: '#3a4a5a', textAlign: 'center',
+                        }}>
+                            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>◈</div>
+                            <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 8, color: '#5a6a7a' }}>
+                                Type a prompt, configure presets, then generate
+                            </div>
+                            <div style={{ fontSize: 13, maxWidth: 400, lineHeight: 1.6 }}>
+                                Write any prompt or pick a quick-start above. Adjust the sliders to
+                                set your style preferences. Click Generate to call Gemini with your
+                                configured system prompt — then adjust sliders and regenerate to see
+                                how different presets change the real AI output.
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* ═══ Right: Control Panel ═══ */}
+                <div style={{
+                    padding: isMobile ? '20px 16px' : '28px 22px',
+                    background: 'rgba(255,255,255,0.01)', overflowY: 'auto',
+                    display: isMobile && mobileTab !== 'controls' ? 'none' : 'block',
+                    flex: isMobile ? 1 : undefined,
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <span style={{
               fontSize: 10, fontWeight: 700, color: '#5a6a7a',
               textTransform: 'uppercase', letterSpacing: '0.08em',
           }}>Prompt Presets</span>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                        <span style={{ fontSize: 10, color: '#5a6a7a' }}>X-Ray</span>
-                        <div
-                            onClick={() => setShowTransparency(!showTransparency)}
-                            style={{
-                                width: 32, height: 18, borderRadius: 9, position: 'relative',
-                                background: showTransparency ? 'rgba(0,212,170,0.3)' : 'rgba(255,255,255,0.08)',
-                                border: showTransparency ? '1px solid rgba(0,212,170,0.5)' : '1px solid rgba(255,255,255,0.1)',
-                                cursor: 'pointer', transition: 'all 0.2s ease',
-                            }}
-                        >
-                            <div style={{
-                                width: 14, height: 14, borderRadius: '50%',
-                                background: showTransparency ? '#00d4aa' : '#5a6a7a',
-                                position: 'absolute', top: 1,
-                                left: showTransparency ? 15 : 1, transition: 'all 0.2s ease',
-                            }} />
-                        </div>
-                    </label>
-                </div>
-
-                <ParameterSlider
-                    label="Efficiency" value={params.efficiency} onChange={updateParam('efficiency')}
-                    description="Maps to prompt: brevity vs verbosity"
-                    lowLabel="Verbose / documented" highLabel="Compact / minimal"
-                    isHighlighted={hoveredInfluence?.efficiency > 0.6}
-                />
-                <ParameterSlider
-                    label="Readability" value={params.readability} onChange={updateParam('readability')}
-                    description="Maps to prompt: formality and language level"
-                    lowLabel="Technical notation" highLabel="Plain English"
-                    isHighlighted={hoveredInfluence?.readability > 0.6}
-                />
-                <ParameterSlider
-                    label="Detail Level" value={params.detail} onChange={updateParam('detail')}
-                    description="Maps to prompt: depth and edge case coverage"
-                    lowLabel="Core concepts only" highLabel="Exhaustive coverage"
-                    isHighlighted={hoveredInfluence?.detail > 0.6}
-                />
-                <ParameterSlider
-                    label="Creativity" value={params.creativity} onChange={updateParam('creativity')}
-                    description={`Maps to prompt + temperature (${(0.3 + (params.creativity / 100) * 0.9).toFixed(1)})`}
-                    lowLabel="Standard approaches" highLabel="Novel / experimental"
-                    isHighlighted={hoveredInfluence?.creativity > 0.6}
-                />
-
-                {/* How it works */}
-                <div style={{
-                    marginTop: 8, padding: '14px 16px', borderRadius: 10,
-                    background: 'rgba(0,212,170,0.04)', border: '1px solid rgba(0,212,170,0.1)',
-                }}>
-                    <div style={{
-                        fontSize: 11, color: '#00d4aa', fontWeight: 600,
-                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6,
-                    }}>How It Works</div>
-                    <div style={{ fontSize: 12, color: '#7a9a8a', lineHeight: 1.5 }}>
-                        Each slider maps to a section of the system prompt sent to Gemini.
-                        The <strong>Creativity</strong> slider also controls the model's
-                        temperature parameter ({(0.3 + (params.creativity / 100) * 0.9).toFixed(1)}).
-                        After generating, adjust sliders and click Regenerate to see how
-                        different prompt presets change the real AI output.
-                    </div>
-                </div>
-
-                {/* Stability legend */}
-                <div style={{ marginTop: 24 }}>
-                    <div style={{
-                        fontSize: 10, fontWeight: 700, color: '#5a6a7a',
-                        textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 14,
-                    }}>Stability Scale</div>
-                    {[
-                        { range: '85–99%', color: '#00d4aa', label: 'High — Consistent across regenerations' },
-                        { range: '65–84%', color: '#f0b429', label: 'Medium — Varies with parameter changes' },
-                        { range: '15–64%', color: '#ff6b6b', label: 'Low — Novel content, high variance' },
-                    ].map((item) => (
-                        <div key={item.range} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
-                            <div style={{ width: 10, height: 10, borderRadius: 3, marginTop: 2, flexShrink: 0, background: item.color, opacity: 0.7 }} />
-                            <div>
-                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: item.color, fontWeight: 600 }}>{item.range}</div>
-                                <div style={{ fontSize: 11, color: '#5a6a7a', lineHeight: 1.4 }}>{item.label}</div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                            <span style={{ fontSize: 10, color: '#5a6a7a' }}>X-Ray</span>
+                            <div
+                                onClick={() => setShowTransparency(!showTransparency)}
+                                style={{
+                                    width: 32, height: 18, borderRadius: 9, position: 'relative',
+                                    background: showTransparency ? 'rgba(0,212,170,0.3)' : 'rgba(255,255,255,0.08)',
+                                    border: showTransparency ? '1px solid rgba(0,212,170,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                                    cursor: 'pointer', transition: 'all 0.2s ease',
+                                }}
+                            >
+                                <div style={{
+                                    width: 14, height: 14, borderRadius: '50%',
+                                    background: showTransparency ? '#00d4aa' : '#5a6a7a',
+                                    position: 'absolute', top: 1,
+                                    left: showTransparency ? 15 : 1, transition: 'all 0.2s ease',
+                                }} />
                             </div>
+                        </label>
+                    </div>
+
+                    <ParameterSlider
+                        label="Efficiency" value={params.efficiency} onChange={updateParam('efficiency')}
+                        description="Maps to prompt: brevity vs verbosity"
+                        lowLabel="Verbose / documented" highLabel="Compact / minimal"
+                        isHighlighted={hoveredInfluence?.efficiency > 0.6}
+                    />
+                    <ParameterSlider
+                        label="Readability" value={params.readability} onChange={updateParam('readability')}
+                        description="Maps to prompt: formality and language level"
+                        lowLabel="Technical notation" highLabel="Plain English"
+                        isHighlighted={hoveredInfluence?.readability > 0.6}
+                    />
+                    <ParameterSlider
+                        label="Detail Level" value={params.detail} onChange={updateParam('detail')}
+                        description="Maps to prompt: depth and edge case coverage"
+                        lowLabel="Core concepts only" highLabel="Exhaustive coverage"
+                        isHighlighted={hoveredInfluence?.detail > 0.6}
+                    />
+                    <ParameterSlider
+                        label="Creativity" value={params.creativity} onChange={updateParam('creativity')}
+                        description={`Maps to prompt + temperature (${(0.3 + (params.creativity / 100) * 0.9).toFixed(1)})`}
+                        lowLabel="Standard approaches" highLabel="Novel / experimental"
+                        isHighlighted={hoveredInfluence?.creativity > 0.6}
+                    />
+
+                    {/* How it works */}
+                    <div style={{
+                        marginTop: 8, padding: '14px 16px', borderRadius: 10,
+                        background: 'rgba(0,212,170,0.04)', border: '1px solid rgba(0,212,170,0.1)',
+                    }}>
+                        <div style={{
+                            fontSize: 11, color: '#00d4aa', fontWeight: 600,
+                            textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6,
+                        }}>How It Works</div>
+                        <div style={{ fontSize: 12, color: '#7a9a8a', lineHeight: 1.5 }}>
+                            Each slider maps to a section of the system prompt sent to Gemini.
+                            The <strong>Creativity</strong> slider also controls the model's
+                            temperature parameter ({(0.3 + (params.creativity / 100) * 0.9).toFixed(1)}).
+                            After generating, adjust sliders and click Regenerate to see how
+                            different prompt presets change the real AI output.
                         </div>
-                    ))}
+                    </div>
+
+                    {/* Stability legend */}
+                    <div style={{ marginTop: 24 }}>
+                        <div style={{
+                            fontSize: 10, fontWeight: 700, color: '#5a6a7a',
+                            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 14,
+                        }}>Stability Scale</div>
+                        {[
+                            { range: '85–99%', color: '#00d4aa', label: 'High — Consistent across regenerations' },
+                            { range: '65–84%', color: '#f0b429', label: 'Medium — Varies with parameter changes' },
+                            { range: '15–64%', color: '#ff6b6b', label: 'Low — Novel content, high variance' },
+                        ].map((item) => (
+                            <div key={item.range} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+                                <div style={{ width: 10, height: 10, borderRadius: 3, marginTop: 2, flexShrink: 0, background: item.color, opacity: 0.7 }} />
+                                <div>
+                                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: item.color, fontWeight: 600 }}>{item.range}</div>
+                                    <div style={{ fontSize: 11, color: '#5a6a7a', lineHeight: 1.4 }}>{item.label}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>

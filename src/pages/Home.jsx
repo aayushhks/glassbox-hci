@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router-dom'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 export default function Home() {
     const navigate = useNavigate()
+    const isMobile = useIsMobile()
 
     return (
         <div
@@ -11,7 +13,7 @@ export default function Home() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 flex: 1,
-                padding: '60px 32px',
+                padding: isMobile ? '40px 16px' : '60px 32px',
                 textAlign: 'center',
                 position: 'relative',
             }}
@@ -79,7 +81,7 @@ export default function Home() {
             </p>
 
             {/* Condition cards */}
-            <div style={{ display: 'flex', gap: 20, maxWidth: 700, width: '100%' }}>
+            <div style={{ display: 'flex', gap: 20, maxWidth: 700, width: '100%', flexDirection: isMobile ? 'column' : 'row' }}>
                 {/* Condition A */}
                 <div
                     onClick={() => navigate('/condition-a')}
