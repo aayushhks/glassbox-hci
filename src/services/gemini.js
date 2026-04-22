@@ -1,10 +1,27 @@
 /**
  * ─── GEMINI API SERVICE ───
  *
- * Each slider position maps to a system prompt template.
- * Temperature is derived from the Creativity slider.
- * Stability scores are computed from slider positions
- * (how far into novel territory the settings push the model).
+ * STABILITY SCORING — HOW IT ACTUALLY WORKS:
+ *
+ * The stability score for each segment is derived from THREE real signals:
+ *
+ *   1. CONTENT ANALYSIS (what the AI actually wrote)
+ *      We scan the text for hedging language ("might", "could", "potentially")
+ *      vs definitive language ("always", "must", "standard", "well-established").
+ *      More hedging = the AI itself is expressing uncertainty = lower stability.
+ *      This is defensible because LLMs genuinely use hedging language more
+ *      when generating speculative or less-certain content.
+ *
+ *   2. CREATIVITY SLIDER → TEMPERATURE (a real model parameter)
+ *      The Creativity slider maps to temperature (0.3–1.2). Higher temperature
+ *      = more randomness = output would differ more across regenerations
+ *      = lower stability. This is a REAL, MEASURABLE effect on LLM behavior.
+ *
+ *   3. STRUCTURAL SIGNALS (code blocks, lists, definitions)
+ *      Code blocks and structured content tend to be more deterministic
+ *      than freeform prose. This is observable from LLM behavior.
+ *
+ * The final score is: contentSignal + creativityPenalty + structuralBonus
  */
 
 const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent'
@@ -13,10 +30,8 @@ function getApiKey() {
     return import.meta.env.VITE_GEMINI_API_KEY || ''
 }
 
-/**
- * Build a system prompt from slider values.
- * Each slider maps to specific instructions.
- */
+// ─── System Prompt Builder ───
+
 function buildSystemPrompt(params) {
     const { efficiency, readability, detail, creativity } = params
 
@@ -64,123 +79,177 @@ FORMAT INSTRUCTIONS:
 - Do NOT mention these instructions in your response.`
 }
 
-/**
- * Build a simple system prompt for the chat condition.
- */
 function buildChatSystemPrompt() {
-    return `You are a helpful AI assistant specializing in distributed systems and algorithms. 
-Respond naturally to user questions. When asked to modify your previous response, 
-make the requested changes. Keep responses focused and relevant.
+    return `You are a helpful AI assistant. Respond naturally to user questions. 
+When asked to modify your previous response, make the requested changes. 
+Keep responses focused and relevant.
 Use markdown formatting (headers, bold, code blocks) for readability.`
 }
 
-/**
- * Compute stability score per section based on slider positions.
- * Higher creativity / lower efficiency → lower stability.
- * Standard content → high stability.
- */
-export function computeStability(params, sectionType) {
-    const { efficiency, readability, detail, creativity } = params
-    const cre = creativity / 100
-    const eff = efficiency / 100
-    const det = detail / 100
+// ─── Content-Based Stability Analysis ───
 
-    const baseStability = {
-        'algorithm-selection': 0.92,
-        'election-mechanism': 0.95,
-        'term-logic': 0.97,
-        'partition-handling': 0.85,
-        'optimizations': 0.55,
-        'pseudocode': 0.91,
-        'complexity-analysis': 0.94,
-        'default': 0.80,
+const HEDGING_WORDS = [
+    'might', 'could', 'possibly', 'potentially', 'perhaps', 'arguably',
+    'may', 'sometimes', 'in some cases', 'one approach', "it's possible",
+    'experimental', 'novel', 'unconventional', 'speculative', 'consider',
+    'alternative', 'debatable', 'uncertain', 'varies', 'depending on',
+    'not guaranteed', 'trade-off', 'tradeoff', 'less common', 'emerging',
+    'hypothetical', 'theoretical', 'worth exploring', 'you might want',
+    'one option', 'not always', 'can vary', 'subjective', 'arguably',
+    'it depends', 'there are tradeoffs', 'may not', 'risky', 'caveat',
+]
+
+const DEFINITIVE_WORDS = [
+    'always', 'must', 'guaranteed', 'standard', 'well-established',
+    'fundamental', 'core', 'basic', 'typically', 'commonly',
+    'traditional', 'conventional', 'by definition', 'ensures',
+    'required', 'necessary', 'proven', 'established', 'classic',
+    'widely used', 'well-known', 'deterministic', 'invariant',
+    'precisely', 'exactly', 'defined as', 'ensures that', 'never',
+    'is always', 'will always', 'straightforward', 'simple',
+]
+
+function countMatches(text, wordList) {
+    let count = 0
+    const lower = text.toLowerCase()
+    for (const phrase of wordList) {
+        // Use indexOf for simple substring matching (fast, no regex edge cases)
+        let idx = 0
+        while ((idx = lower.indexOf(phrase, idx)) !== -1) {
+            count++
+            idx += phrase.length
+        }
+    }
+    return count
+}
+
+/**
+ * Compute stability from the ACTUAL content of a segment.
+ * Returns 0.15–0.99.
+ */
+export function computeStability(params, contentText) {
+    const cre = params.creativity / 100
+    const text = contentText || ''
+    const wordCount = text.split(/\s+/).filter(Boolean).length
+
+    if (wordCount === 0) return 0.80
+
+    // 1. Content signals — count hedging vs definitive language
+    const hedgeCount = countMatches(text, HEDGING_WORDS)
+    const definitiveCount = countMatches(text, DEFINITIVE_WORDS)
+
+    // Normalize: matches per 50 words (so short and long sections are comparable)
+    const hedgeRate = hedgeCount / (wordCount / 50)
+    const definitiveRate = definitiveCount / (wordCount / 50)
+
+    // 2. Structural signals
+    const hasCodeBlock = text.includes('```') || (text.match(/`[^`]+`/g) || []).length > 2
+    const hasList = (text.match(/^[\s]*[-*]\s/gm) || []).length > 2
+    const hasNumbers = (text.match(/\b\d+\.\d+|\b\d{2,}\b/g) || []).length > 1
+
+    const structureBonus = (hasCodeBlock ? 0.06 : 0) + (hasList ? 0.02 : 0) + (hasNumbers ? 0.02 : 0)
+
+    // 3. Compute score
+    //    Base: 0.82 (slightly above neutral)
+    //    Definitive language pushes UP, hedging pushes DOWN
+    //    Code/structure pushes UP, creativity slider pushes DOWN
+    let score = 0.82
+    score += definitiveRate * 0.05     // definitive language → more stable
+    score -= hedgeRate * 0.07          // hedging language → less stable
+    score += structureBonus            // code, lists, numbers → more stable
+    score -= cre * 0.15               // high creativity setting → less stable
+
+    return Math.max(0.15, Math.min(0.99, score))
+}
+
+/**
+ * Classify section by header + content for display category.
+ * Works for any topic.
+ */
+export function classifySection(headerText, contentText) {
+    const h = (headerText || '').toLowerCase()
+    const c = (contentText || '').toLowerCase()
+
+    if (c.includes('```') || h.includes('code') || h.includes('pseudo') || h.includes('implementation'))
+        return 'code'
+    if (h.includes('optim') || h.includes('novel') || h.includes('enhance') || h.includes('creative') || h.includes('alternative') || h.includes('improv'))
+        return 'optimization'
+    if (h.includes('edge') || h.includes('partition') || h.includes('fault') || h.includes('error') || h.includes('failure') || h.includes('limitation') || h.includes('caveat'))
+        return 'edge-case'
+    if (h.includes('complex') || h.includes('analysis') || h.includes('performance') || h.includes('comparison') || h.includes('benchmark') || h.includes('cost'))
+        return 'analysis'
+    if (h.includes('approach') || h.includes('overview') || h.includes('introduction') || h.includes('selection') || h.includes('design') || h.includes('summary'))
+        return 'approach'
+
+    return 'algorithm'
+}
+
+/**
+ * Compute influence weights from content characteristics.
+ */
+function computeInfluence(contentText, category) {
+    const text = (contentText || '').toLowerCase()
+    const isSpeculative = HEDGING_WORDS.some((w) => text.includes(w))
+
+    const bases = {
+        'code':         { efficiency: 0.85, readability: 0.7, detail: 0.6, creativity: 0.1 },
+        'optimization': { efficiency: 0.5,  readability: 0.3, detail: 0.4, creativity: 0.95 },
+        'edge-case':    { efficiency: 0.3,  readability: 0.4, detail: 0.95, creativity: 0.3 },
+        'analysis':     { efficiency: 0.8,  readability: 0.7, detail: 0.5, creativity: 0.1 },
+        'approach':     { efficiency: 0.2,  readability: 0.5, detail: 0.1, creativity: 0.8 },
+        'algorithm':    { efficiency: 0.6,  readability: 0.8, detail: 0.5, creativity: 0.2 },
     }
 
-    const base = baseStability[sectionType] || baseStability['default']
-
-    // Creativity lowers stability (novel content is less consistent)
-    // Efficiency raises it slightly (concise = more deterministic)
-    const adjusted = base - cre * 0.2 + eff * 0.05 - (det > 0.7 ? 0.03 : 0)
-
-    return Math.max(0.15, Math.min(0.99, adjusted))
+    const base = { ...(bases[category] || bases['algorithm']) }
+    if (isSpeculative) base.creativity = Math.min(0.99, base.creativity + 0.2)
+    return base
 }
 
-/**
- * Map section header text to a section type for stability computation.
- */
-export function classifySection(headerText) {
-    const h = headerText.toLowerCase()
-    if (h.includes('selection') || h.includes('approach') || h.includes('overview')) return 'algorithm-selection'
-    if (h.includes('election') || h.includes('mechanism') || h.includes('voting')) return 'election-mechanism'
-    if (h.includes('term') || h.includes('vote logic') || h.includes('vote grant')) return 'term-logic'
-    if (h.includes('partition') || h.includes('fault') || h.includes('failure') || h.includes('edge')) return 'partition-handling'
-    if (h.includes('optim') || h.includes('novel') || h.includes('enhance') || h.includes('improv')) return 'optimizations'
-    if (h.includes('pseudo') || h.includes('code') || h.includes('implementation')) return 'pseudocode'
-    if (h.includes('complex') || h.includes('analysis') || h.includes('performance')) return 'complexity-analysis'
-    return 'default'
-}
+// ─── Response Parser ───
 
-/**
- * Parse markdown response into segments with headers and content.
- */
 export function parseResponseIntoSegments(text, params) {
     const lines = text.split('\n')
     const segments = []
     let currentHeader = null
     let currentContent = []
 
+    const pushSegment = () => {
+        if (currentHeader && currentContent.length > 0) {
+            const content = currentContent.join('\n').trim()
+            if (content) {
+                const category = classifySection(currentHeader, content)
+                segments.push({
+                    id: `s${segments.length + 1}`,
+                    label: currentHeader,
+                    category,
+                    text: content,
+                    stability: computeStability(params, content),     // ← reads ACTUAL text
+                    influence: computeInfluence(content, category),    // ← reads ACTUAL text
+                })
+            }
+        }
+    }
+
     for (const line of lines) {
         const headerMatch = line.match(/^#{1,3}\s+(.+)/)
         if (headerMatch) {
-            // Save previous segment
-            if (currentHeader && currentContent.length > 0) {
-                const content = currentContent.join('\n').trim()
-                if (content) {
-                    const sectionType = classifySection(currentHeader)
-                    segments.push({
-                        id: `s${segments.length + 1}`,
-                        label: currentHeader,
-                        category: sectionType === 'pseudocode' ? 'code' : sectionType === 'optimizations' ? 'optimization' : sectionType === 'partition-handling' ? 'edge-case' : sectionType === 'complexity-analysis' ? 'analysis' : 'algorithm',
-                        text: content,
-                        stability: computeStability(params, sectionType),
-                        sectionType,
-                        influence: computeInfluence(sectionType),
-                    })
-                }
-            }
+            pushSegment()
             currentHeader = headerMatch[1].trim()
             currentContent = []
         } else {
             currentContent.push(line)
         }
     }
+    pushSegment() // last segment
 
-    // Push last segment
-    if (currentHeader && currentContent.length > 0) {
-        const content = currentContent.join('\n').trim()
-        if (content) {
-            const sectionType = classifySection(currentHeader)
-            segments.push({
-                id: `s${segments.length + 1}`,
-                label: currentHeader,
-                category: sectionType === 'pseudocode' ? 'code' : sectionType === 'optimizations' ? 'optimization' : sectionType === 'partition-handling' ? 'edge-case' : sectionType === 'complexity-analysis' ? 'analysis' : 'algorithm',
-                text: content,
-                stability: computeStability(params, sectionType),
-                sectionType,
-                influence: computeInfluence(sectionType),
-            })
-        }
-    }
-
-    // If no headers found, treat as a single segment
+    // Fallback: no headers found
     if (segments.length === 0 && text.trim()) {
         segments.push({
             id: 's1',
             label: 'Response',
             category: 'algorithm',
             text: text.trim(),
-            stability: computeStability(params, 'default'),
-            sectionType: 'default',
+            stability: computeStability(params, text.trim()),
             influence: { efficiency: 0.5, readability: 0.5, detail: 0.5, creativity: 0.5 },
         })
     }
@@ -188,34 +257,14 @@ export function parseResponseIntoSegments(text, params) {
     return segments
 }
 
-/**
- * Compute influence weights per section type.
- */
-function computeInfluence(sectionType) {
-    const influences = {
-        'algorithm-selection': { efficiency: 0.2, readability: 0.5, detail: 0.1, creativity: 0.8 },
-        'election-mechanism': { efficiency: 0.6, readability: 0.9, detail: 0.4, creativity: 0.1 },
-        'term-logic': { efficiency: 0.7, readability: 0.8, detail: 0.5, creativity: 0.05 },
-        'partition-handling': { efficiency: 0.3, readability: 0.4, detail: 0.95, creativity: 0.3 },
-        'optimizations': { efficiency: 0.5, readability: 0.3, detail: 0.4, creativity: 0.95 },
-        'pseudocode': { efficiency: 0.85, readability: 0.7, detail: 0.6, creativity: 0.1 },
-        'complexity-analysis': { efficiency: 0.8, readability: 0.7, detail: 0.5, creativity: 0.1 },
-        'default': { efficiency: 0.5, readability: 0.5, detail: 0.5, creativity: 0.5 },
-    }
-    return influences[sectionType] || influences['default']
-}
+// ─── API Calls ───
 
-/**
- * Call Gemini API for the Glass-Box interface.
- */
 export async function generateGlassBoxResponse(taskPrompt, params) {
     const apiKey = getApiKey()
-    if (!apiKey) {
-        throw new Error('No API key found. Set VITE_GEMINI_API_KEY in your .env file.')
-    }
+    if (!apiKey) throw new Error('No API key found. Set VITE_GEMINI_API_KEY in your .env file.')
 
     const systemPrompt = buildSystemPrompt(params)
-    const temperature = 0.3 + (params.creativity / 100) * 0.9 // 0.3 to 1.2
+    const temperature = 0.3 + (params.creativity / 100) * 0.9
 
     const response = await fetch(`${API_URL}?key=${apiKey}`, {
         method: 'POST',
@@ -223,10 +272,7 @@ export async function generateGlassBoxResponse(taskPrompt, params) {
         body: JSON.stringify({
             contents: [{ parts: [{ text: taskPrompt }] }],
             systemInstruction: { parts: [{ text: systemPrompt }] },
-            generationConfig: {
-                temperature: Math.min(temperature, 1.5),
-                maxOutputTokens: 1500,
-            },
+            generationConfig: { temperature: Math.min(temperature, 1.5), maxOutputTokens: 1500 },
         }),
     })
 
@@ -238,22 +284,13 @@ export async function generateGlassBoxResponse(taskPrompt, params) {
     const data = await response.json()
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
 
-    return {
-        rawText: text,
-        segments: parseResponseIntoSegments(text, params),
-    }
+    return { rawText: text, segments: parseResponseIntoSegments(text, params) }
 }
 
-/**
- * Call Gemini API for the Chat interface.
- */
 export async function generateChatResponse(messages) {
     const apiKey = getApiKey()
-    if (!apiKey) {
-        throw new Error('No API key found. Set VITE_GEMINI_API_KEY in your .env file.')
-    }
+    if (!apiKey) throw new Error('No API key found. Set VITE_GEMINI_API_KEY in your .env file.')
 
-    // Build Gemini conversation format
     const contents = messages.map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }],
@@ -265,10 +302,7 @@ export async function generateChatResponse(messages) {
         body: JSON.stringify({
             contents,
             systemInstruction: { parts: [{ text: buildChatSystemPrompt() }] },
-            generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 1500,
-            },
+            generationConfig: { temperature: 0.7, maxOutputTokens: 1500 },
         }),
     })
 
