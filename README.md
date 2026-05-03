@@ -192,7 +192,3 @@ Continuous sliders enable *exploration* — users can discover the parameter spa
 - Greenberg, S. & Buxton, B. (2008). Usability Evaluation Considered Harmful. *CHI 2008*
 
 ---
-
-## Author
-
-**Aayush Kumar** — MS Computer Science, Boston University
